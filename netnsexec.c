@@ -15,6 +15,15 @@
 #include "netnsexec.h"
 #include "version.h"
 
+#define CCALL(_expr) \
+    do { \
+        int __ret = (_expr); \
+        if (__ret < 0) { \
+            const int __err = errno; \
+            fprintf(stderr, "%s returns %d, errno: %d (%s)\n", #_expr, __ret, __err, strerror(__err)); \
+            exit(__err != 0 ? __err : 1); \
+        } \
+    } while(0)
 
 void usage(int exit_code)
 {
@@ -171,7 +180,7 @@ int my_setns(int fd, int nstype)
 
 void write_pidfile(const char* pidfile)
 {
-    int fd = open(pidfile, O_CREAT|O_TRUNC|O_RDWR);
+    int fd = open(pidfile, O_CREAT|O_TRUNC|O_RDWR, 0644);
     if (fd < 0) {
         fprintf(stderr, "Can't open() pidfile %s: %s (%d)\n", pidfile, strerror(errno), errno);
         exit(errno);
@@ -182,13 +191,7 @@ void write_pidfile(const char* pidfile)
 
     size_t len = strlen(pid);
     if (write(fd, pid, len) != len) {
-        fprintf(stderr, "Can't or partially write() pidfile %s: %s (%d)\n", pidfile, strerror(errno), errno);
-        close(fd);
-        exit(errno);
-    }
-
-    if (fchmod(fd, 0644) < 0) {
-        fprintf(stderr, "Can't or chmod(0644) pidfile %s: %s (%d)\n", pidfile, strerror(errno), errno);
+        fprintf(stderr, "Unable to or partially write() pidfile %s: %s (%d)\n", pidfile, strerror(errno), errno);
         close(fd);
         exit(errno);
     }
@@ -201,27 +204,26 @@ int launch(char* const* argv, FILE** cout, FILE** cerr)
     int pipeout[2];
     int pipeerr[2];
 
-    if (cout && pipe(pipeout) < 0) {
-        fprintf(stderr, "pipe(pipeout) failed: %s (%d)\n", strerror(errno), errno);
-        exit(errno);
+    if (cout) {
+        CCALL(pipe(pipeout));
     }
 
-    if (cerr && pipe(pipeerr) < 0) {
-        fprintf(stderr, "pipe(pipeerr) failed: %s (%d)\n", strerror(errno), errno);
-        exit(errno);
+    if (cerr) {
+        CCALL(pipe(pipeerr));
     }
+
 
     int pid = fork();
     if (pid == 0) {  // child
         if (cout) {
-            dup2(pipeout[1], STDOUT_FILENO);
-            close(pipeout[0]);
-            close(pipeout[1]);
+            CCALL(dup2(pipeout[1], STDOUT_FILENO));
+            CCALL(close(pipeout[0]));
+            CCALL(close(pipeout[1]));
         }
         if (cerr) {
-            dup2(pipeerr[1], STDERR_FILENO);
-            close(pipeerr[0]);
-            close(pipeerr[1]);
+            CCALL(dup2(pipeerr[1], STDERR_FILENO));
+            CCALL(close(pipeerr[0]));
+            CCALL(close(pipeerr[1]));
         }
 
         if (execvp(argv[0], argv) < 0) {
@@ -232,18 +234,15 @@ int launch(char* const* argv, FILE** cout, FILE** cerr)
         int status;
 
         if (cout) {
-            close(pipeout[1]);
+            CCALL(close(pipeout[1]));
             *cout = fdopen(pipeout[0], "r");
         }
         if (cerr) {
-            close(pipeerr[1]);
+            CCALL(close(pipeerr[1]));
             *cerr = fdopen(pipeerr[0], "r");
         }
 
-        if (waitpid(pid, &status, 0) < 0) {
-            fprintf(stderr, "waitpid(%d) failed: %s (%d)\n", pid, strerror(errno), errno);
-            exit(errno);
-        }
+        CCALL(waitpid(pid, &status, 0));
 
         return status;
     }
@@ -261,10 +260,7 @@ void set_netns(const char* netns)
         return;
     }
     else if (strcmp(netns, "unshare") == 0) {
-        if (my_unshare(CLONE_NEWNET) < 0) {
-            fprintf(stderr, "unshare(CLONE_NEWNET) error: %s (%d)\n", strerror(errno), errno);
-            exit(errno);
-        }
+        CCALL(my_unshare(CLONE_NEWNET));
         return;
     }
 
@@ -326,13 +322,8 @@ void set_netns(const char* netns)
 
     free(nsfile);
 
-    ret = my_setns(fd, CLONE_NEWNET);
-    close(fd);
-
-    if (ret < 0) {
-        fprintf(stderr, "setns() failed: %s (%d)\n", strerror(errno), errno);
-        exit(errno);
-    }
+    CCALL(my_setns(fd, CLONE_NEWNET));
+    CCALL(close(fd));
 }
 
 void setup_lo_interface(cmd_options *options)
@@ -366,6 +357,9 @@ int main(int argc, char** argv)
     errno = 0;
 
     /* Parse command line arguments */
+    if (argc == 1) {
+        usage(0);
+    }
     int program_at = parse_options(&options, argc, argv);
 
     /* Write pid file if required */
@@ -374,10 +368,7 @@ int main(int argc, char** argv)
         if (options.str_uid || options.str_gid) {
             unsigned uid = options.str_uid ? options.uid : getuid();    // TODO: getuid() or geteuid() ?
             unsigned gid = options.str_gid ? options.gid : getgid();    // TODO:
-            if (chown(options.pidfile, uid, gid) < 0) {
-                fprintf(stderr, "Can't chown() pidfile %s: %s (%d)\n", options.pidfile, strerror(errno), errno);
-                exit(errno);
-            }
+            CCALL(chown(options.pidfile, uid, gid));
         }
     }
 
@@ -391,23 +382,17 @@ int main(int argc, char** argv)
 
     /* Switch to specific user & group if required */
     if (options.str_gid) {
-        if (setgid(options.gid) < 0) {
-            fprintf(stderr, "Can't setgid(%d): %s (%d)\n", options.gid, strerror(errno), errno);
-            exit(errno);
-        }
+        CCALL(setgid(options.gid));
     }
     else if (getegid() != getgid()) {
-        setegid(getgid());
+        CCALL(setegid(getgid()));
     }
 
     if (options.str_uid) {
-        if (setuid(options.uid) < 0) {
-            fprintf(stderr, "Can't setuid(%d): %s (%d)\n", options.uid, strerror(errno), errno);
-            exit(errno);
-        }
+        CCALL(setuid(options.uid));
     }
     else if (geteuid() != getuid()) {
-        seteuid(getuid());
+        CCALL(seteuid(getuid()));
     }
 
     if (options.verbose) {
@@ -416,10 +401,7 @@ int main(int argc, char** argv)
 
     /* Change to specific directory */
     if (options.workdir) {
-        if (chdir(options.workdir) < 0) {
-            fprintf(stderr, "Can't chdir(%s): %s (%d)\n", options.workdir, strerror(errno), errno);
-            exit(errno);
-        }
+        CCALL(chdir(options.workdir));
     }
 
     /* Execute the program */
