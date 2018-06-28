@@ -1,0 +1,11 @@
+
+# CLion files
+/.idea/
+/cmake-build-*/
+
+# Build directory
+/build/
+
+# Ignore draft
+/draft/
+
