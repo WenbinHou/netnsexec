@@ -6,3 +6,6 @@
 # Build directory
 /build/
 
+# Ignore draft
+/draft/
+
