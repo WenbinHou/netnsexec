@@ -2,6 +2,7 @@
 
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
@@ -11,7 +12,6 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include <grp.h>
-#include <wait.h>
 #include "netnsexec.h"
 #include "version.h"
 
