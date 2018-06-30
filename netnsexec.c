@@ -46,6 +46,7 @@ void usage(int exit_code)
            "    <abs_netns_path>        Absolute path (starting with '/') of netns file\n"
            "    iproute2/<name>         Short for /var/run/netns/<name>\n"
            "    proc/<xxx>              Short for /proc/<xxx>/ns/net (xxx could be pid, tid, \"self\")\n"
+           "    pidfile/<xxx>           Read pid from <pidfile>, and switch to /proc/<pid>/ns/net\n"
            "    docker/<container>      Use 'docker inspect' to obtain its network space\n"
            "\n");
     exit(exit_code);
@@ -253,6 +254,7 @@ void set_netns(const char* netns)
     const char* PREFIX_IPROUTE2 = "iproute2/";
     const char* PREFIX_PROC = "proc/";
     const char* PREFIX_DOCKER = "docker/";
+    const char* PREFIX_PIDFILE = "pidfile/";
     char* nsfile;
     int fd, ret;
 
@@ -282,6 +284,23 @@ void set_netns(const char* netns)
     }
     else if (strncmp(netns, PREFIX_PROC, strlen(PREFIX_PROC)) == 0) {
         sprintf(nsfile, "/proc/%s/ns/net", netns + strlen(PREFIX_PROC));
+    }
+    else if (strncmp(netns, PREFIX_PIDFILE, strlen(PREFIX_PIDFILE)) == 0) {
+        unsigned pid;
+        char dummy;
+        FILE* fpid = fopen(netns + strlen(PREFIX_PIDFILE), "r");
+        if (!fpid) {
+            fprintf(stderr, "pidfile %s does not exist or is not readable\n", netns + strlen(PREFIX_PIDFILE));
+            exit(2);
+        }
+
+        if (fscanf(fpid, " %u %c", &pid, &dummy) != 1) {
+            fprintf(stderr, "pidfile %s is not a valid pidfile\n", netns + strlen(PREFIX_PIDFILE));
+            exit(2);
+        }
+        fclose(fpid);
+
+        sprintf(nsfile, "/proc/%u/ns/net", pid);
     }
     else if (strncmp(netns, PREFIX_DOCKER, strlen(PREFIX_DOCKER)) == 0) {
         char* argv[] = {
